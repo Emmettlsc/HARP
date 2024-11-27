@@ -26,19 +26,23 @@ from utils import create_dir_if_not_exists, get_root_path, natural_keys
 PRAGMA_POSITION = {'PIPELINE': 0, 'TILE': 2, 'PARALLEL': 1}
 BENCHMARK = 'machsuite'
 BENCHMARK = 'poly'
-type_graph = 'harp' 
+type_graph = 'harp'
 processed_gexf_folder = join(get_root_path(), f'{type_graph}/{BENCHMARK}/processed')
 auxiliary_node_gexf_folder = join(get_root_path(), f'{type_graph}/{BENCHMARK}/processed/extended-pseudo-block-base/')
+
+CUSTOM_KERNEL = ['atax', 'cnn', 'jacobi', 'rijndael', 'tensor']
+
 MACHSUITE_KERNEL = ['aes', 'gemm-blocked', 'gemm-ncubed', 'spmv-crs', 'spmv-ellpack', 'stencil_stencil2d',
                     'nw', 'md', 'stencil-3d']
 
-poly_KERNEL = ['2mm', '3mm', 'adi', 'atax', 'bicg', 'bicg-large', 'covariance', 'doitgen', 
-               'doitgen-red', 'fdtd-2d', 'fdtd-2d-large', 'gemm-p', 'gemm-p-large', 'gemver', 
-               'gesummv', 'heat-3d', 'jacobi-1d', 'jacobi-2d', 'mvt', 'seidel-2d', 'symm', 
+poly_KERNEL = ['2mm', '3mm', 'adi', 'atax', 'bicg', 'bicg-large', 'covariance', 'doitgen',
+               'doitgen-red', 'fdtd-2d', 'fdtd-2d-large', 'gemm-p', 'gemm-p-large', 'gemver',
+               'gesummv', 'heat-3d', 'jacobi-1d', 'jacobi-2d', 'mvt', 'seidel-2d', 'symm',
                'symm-opt', 'syrk', 'syr2k', 'trmm', 'trmm-opt', 'mvt-medium', 'correlation',
                'atax-medium', 'bicg-medium', 'gesummv-medium', 'symm-opt-medium',
                'gemver-medium']
-ALL_KERNEL = {'machsuite': MACHSUITE_KERNEL, 'poly': poly_KERNEL}
+
+ALL_KERNEL = {'custom': CUSTOM_KERNEL}
 
 class Node():
     def __init__(self, block, function, text, type_n, features = None):
@@ -63,7 +67,7 @@ class Node():
             n_dict['full_text'] = self.features
         else:
             n_dict['features'] = {'full_text': [self.features]}
-        
+
 
         return n_dict
 
@@ -90,11 +94,11 @@ def add_to_graph(g_nx, nodes, edges):
         g_nx.add_nodes_from(nodes)
     if len(edges) > 0:
         g_nx.add_edges_from(edges)
-    
+
 def copy_files(name, src, dest):
     '''
         copy the generated files to the project directory
-        
+
         args:
             name: the kernel name
             src: the path to the files
@@ -113,15 +117,15 @@ def copy_files(name, src, dest):
             source_dest = join(os.getcwd(), BENCHMARK, 'sources', new_f_name)
             copy(f, source_dest)
         copy(f, dest)
-    
+
 def read_json_graph(name, readable=True):
     '''
         reads a graph in json format as a netwrokx graph
-        
+
         args:
             name: name of the json file/ kernel's name
             reaable: whether to store a readable format of the json file
-            
+
         returns:
             g_nx: graph in networkx format
     '''
@@ -131,17 +135,17 @@ def read_json_graph(name, readable=True):
     g_nx=nx.readwrite.json_graph.node_link_graph(js_graph)
     if readable:
         make_json_readable(name, js_graph)
-    
+
     return g_nx
 
 
 def llvm_to_nx(name):
     '''
         reads a LLVM IR and converts it to a netwrokx graph
-        
+
         args:
             name: name of the LLVM file/ kernel's name
-            
+
         returns:
             g_nx: graph in networkx format
     '''
@@ -150,34 +154,34 @@ def llvm_to_nx(name):
         ll_file = f.read()
         G=programl.from_llvm_ir(ll_file)
         g_nx=programl.to_networkx(G)
-    
+
     return g_nx
 
 def make_json_readable(name, js_graph):
     '''
         gets a json file and beautifies it to make it readable
-        
+
         args:
             name: kernel name
             js_graph: the graph in networkx format read from the json file
-            
+
         writes:
-            a readable json file with name {name}_pretty.json    
+            a readable json file with name {name}_pretty.json
     '''
     filename = name + '_pretty.json'
     f_json=open((filename), "w+")
     json.dump(js_graph, f_json, indent=4, sort_keys=True)
     f_json.close()
 
- 
+
 
 def extract_function_names(c_code):
     '''
         extract the names of the function in c code along with their line number
-        
+
         args:
             c_code: the c_code read with code.read()
-            
+
         return:
             a list of tuples of (function name, line number)
     '''
@@ -215,13 +219,13 @@ def get_tc_for_loop(for_loop_text):
 def get_icmp(path, name, log=False):
     '''
         gets an llvm file and returns the icmp instructions of each for loop
-        
+
         args:
             path: parent directory of the llvm file
             name: kernel name
-                    
+
         returns:
-            a dictionary corresponding to the icmp instructions: 
+            a dictionary corresponding to the icmp instructions:
                 {for loop id: [icmp instruction, for.cond line number, icmp line number]}
             number of for loops
     '''
@@ -254,17 +258,17 @@ def get_icmp(path, name, log=False):
 def get_pragmas_loops(path, name, EXT='c', log=False):
     '''
         gets a c kernel and returns the pragmas of each for loop
-        
+
         args:
             path: parent directory of the kernel file
             name: kernel name
-                    
+
         returns:
             a dictionary with each entry showing the for loop and its pragmas
                 {for loop id: [for loop source code, [list of pragmas]]}
             number of for loops
     '''
-    
+
     for_dict_source = OrderedDict() ## {function name: {for loop id: [for loop source code, [list of pragmas]]}}
     f_source = open(join(path, f'{name}.{EXT}'), 'r')
     lines_source = f_source.readlines()
@@ -301,23 +305,23 @@ def get_pragmas_loops(path, name, EXT='c', log=False):
                 if line.startswith('#pragma') and not 'KERNEL' in line.upper():
                     pragma_list = [line]
                     pragma_zone = True
-    
+
     if log:
         print(json.dumps(for_dict_source, indent=4))
-        
+
     return for_dict_source, for_count_source
 
 
 def create_pragma_nodes(g_nx, g_nx_nodes, for_dict_source, for_dict_llvm, log = True):
     '''
         creates nodes for each pragma to be added to the graph
-        
+
         args:
             g_nx: the graph object
             g_nx_nodes: number of nodes of the graph object
             for_dict_source: the for loops along with their pragmas
             for_dict_llvm: the for loops along with their icmp instruction in llvm
-                    
+
         returns:
             a list of nodes and a list of edges to be added to the graph
     '''
@@ -356,7 +360,7 @@ def create_pragma_nodes(g_nx, g_nx_nodes, for_dict_source, for_dict_llvm, log = 
             if not node_id:
                 print(f'icmp instruction {icmp_inst} not found.')
                 raise RuntimeError()
-            
+
             for pragma in pragmas:
                 p_dict = {}
                 p_dict['type'] = 3
@@ -365,16 +369,16 @@ def create_pragma_nodes(g_nx, g_nx_nodes, for_dict_source, for_dict_llvm, log = 
                 p_dict['features'] = {'full_text': [pragma]}
                 p_dict['text'] = pragma.split(' ')[2]
                 new_nodes.append((new_node_id, p_dict))
-                
+
                 e_dict = {'flow': 3, 'position': PRAGMA_POSITION[p_dict['text'].upper()]}
                 new_edges.append((node_id, new_node_id, e_dict))
                 new_edges.append((new_node_id, node_id, e_dict))
-                
+
                 new_node_id += 1
-    if log:        
+    if log:
         pprint(new_nodes)
         pprint(new_edges)
-        
+
     return new_nodes, new_edges
 
 def prune_redundant_nodes(g_new):
@@ -392,9 +396,9 @@ def prune_redundant_nodes(g_new):
 
 def process_graph(name, g, csv_dict=None):
     '''
-        adjusts the node/edge attributes, removes redundant nodes, 
+        adjusts the node/edge attributes, removes redundant nodes,
             and writes the final graph to be used by GNN-DSE
-        
+
         args:
             name: kernel name
             dest: where to store the graph
@@ -406,11 +410,11 @@ def process_graph(name, g, csv_dict=None):
             feat = ndata['features']
             attrs['full_text'] = feat['full_text'][0]
             del attrs['features']
-            
+
         g_new.add_node(node)
         nx.set_node_attributes(g_new, {node: attrs})
 
-    edge_list = []  
+    edge_list = []
     id = 0
     for nid1, nid2, edata in g.edges(data=True):
         edata['id'] = id
@@ -445,32 +449,34 @@ def graph_generator(name, path, benchmark, generate_programl = False, csv_dict=N
             benchmark: [machsuite|poly] None: simple program
     """
     ## generate PrograML graph
+    print("before generate_programl if")
     if generate_programl:
+        print("generate_programl is TRUE")
         p = Popen(f"{get_root_path()}/clang_script.sh {name} {path} {type_graph}", shell = True, stdout = PIPE)
         p.wait()
-        
+
     ## convert it to networkx format
     # g_nx = read_json_graph(join(path, name))
     g_nx = llvm_to_nx(join(path, name))
     g_nx_nodes, g_nx_edges = g_nx.number_of_nodes(), len(g_nx.edges)
-    
+
     ## find for loops and icmp instructions in llvm code
     for_dict_llvm, for_count_llvm = get_icmp(path, name)
-    
+
     ## find for loops and their pragmas in the C/C++ code
     for_dict_source, for_count_source = get_pragmas_loops(path, name)
     assert for_count_llvm == for_count_source, f'the number of for loops from the LLVM code and source code do not match ' \
                                                f'{for_count_llvm} in llvm vs {for_count_source} in the code'
-    
+
     print(f'number of nodes: {g_nx_nodes} and number of edges: {g_nx_edges}')
     graph_path = join(path, name+'.gexf')
     nx.write_gexf(g_nx, graph_path)
-    
+
     augment_graph = True
     if augment_graph:
         ## create pragma nodes and their edges
         new_nodes, new_edges = create_pragma_nodes(g_nx, g_nx_nodes, for_dict_source, for_dict_llvm)
-        
+
         add_to_graph(g_nx, new_nodes, new_edges)
         print(f'number of new nodes: {g_nx.number_of_nodes()} and number of new edges: {len(g_nx.edges)}')
         process = True
@@ -492,8 +498,8 @@ def graph_generator(name, path, benchmark, generate_programl = False, csv_dict=N
 def get_for_blocks_info(name, path):
     with open(join(path, name, f'{name}.ll'), 'r') as f_llvm:
         lines_llvm = f_llvm.readlines()
-        
-    for_blocks_info = OrderedDict() # label: {ind: loop number, preds:, next_instr:, line_num:, end: [(for.end line num, for.end label)], possible_children: children:} 
+
+    for_blocks_info = OrderedDict() # label: {ind: loop number, preds:, next_instr:, line_num:, end: [(for.end line num, for.end label)], possible_children: children:}
     # possible_children are all children, children is only first level children
     # check up to 3 next instr to make sure the block is correct
     for_stack = [] # push for.cond pop for.end
@@ -515,7 +521,7 @@ def get_for_blocks_info(name, path):
                 res_cond = for_stack.pop()
                 assert res_cond in for_blocks_info
                 for_blocks_info[res_cond]['end'] = (idx, line)
-            
+
     for for_l, for_l_value in for_blocks_info.items():
         if 'cond' in for_l:
             for_start.append(for_l_value['line_num'])
@@ -531,7 +537,7 @@ def get_for_blocks_info(name, path):
             else:
                 break
         for_blocks_info[for_label[idx]]['possible_children'] = possible_children
-        
+
     for for_l, for_l_value in for_blocks_info.items():
         possible_children = for_l_value['possible_children']
         children = []
@@ -540,7 +546,7 @@ def get_for_blocks_info(name, path):
             children.append(possible_children[i])
             i += len(for_blocks_info[possible_children[i]]['possible_children']) + 1
         for_l_value['children'] = children
-        
+
     return for_blocks_info
 
 
@@ -589,8 +595,8 @@ def augment_graph_hierarchy(name, for_blocks_info, src_path, dst_path, csv_dict=
             if not found:
                 print(f'could not find the respective block for label {for_l}')
                 raise RuntimeError()
-            
-        
+
+
         node_ids_block = {}
         for for_l in for_blocks_info:
             ## find pseudo node of each for loop
@@ -600,7 +606,7 @@ def augment_graph_hierarchy(name, for_blocks_info, src_path, dst_path, csv_dict=
                 if ndata['block'] == block_ids[for_l][0] and ndata['function'] == block_ids[for_l][1]:
                     node_ids_block[for_l] = node
                     break
-        
+
         for for_l, for_l_value in for_blocks_info.items():
             ## connect hierarchy edges
             if len(for_l_value['children']) == 0:
@@ -632,7 +638,7 @@ def augment_graph_hierarchy(name, for_blocks_info, src_path, dst_path, csv_dict=
         raise NotImplementedError()
 
 
-    
+
 def add_auxiliary_nodes(name, path, processed_path, csv_dict, node_type = 'block', connected = False):
     if node_type == 'block':
         gexf_file = join(path, f'{name}_processed_result.gexf')
@@ -672,7 +678,7 @@ def add_auxiliary_nodes(name, path, processed_path, csv_dict, node_type = 'block
                 if ndata['block'] not in block_func[ndata['function']]['blocks']:
                     block_func[ndata['function']]['count'] += 1
                     block_func[ndata['function']]['blocks'].append(ndata['block'])
-            
+
             key = f"function-{ndata['function']}-block-{ndata['block']}"
             pseudo_node = block_nodes[key]['node']
             pseudo_id = block_nodes[key]['id']
@@ -705,7 +711,7 @@ def add_auxiliary_nodes(name, path, processed_path, csv_dict, node_type = 'block
         g_nx_nodes, g_nx_edges = g_new.number_of_nodes(), len(g_new.edges)
         for f, b in block_func.items():
             # print(f, b)
-            max_block += b['count'] 
+            max_block += b['count']
         assert g_nx_nodes == orig_nodes + max_block
         print(f'ending with {g_nx_nodes} nodes and {g_nx_edges} edges, max block: {max_block}')
         current_g_value['new_node'] = g_nx_nodes
@@ -727,7 +733,7 @@ def remove_extra_header(src_dir, kernel_name):
                 if line.startswith('#include') and 'merlin_type_define' in line:
                     continue
                 fpnew.write(line)
-    
+
     shutil.copymode(orig_file, abs_path)
     shutil.copy(abs_path, orig_file)
 
@@ -741,7 +747,7 @@ def write_csv_file(csv_dict, csv_header, file_path):
             f_writer.writerow(value)
 
 
-def run_graph_gen(mode='initial', connected=True, target=['machsuite', 'poly'], ALL_KERNEL=ALL_KERNEL):
+def run_graph_gen(mode='initial', connected=True, target=['custom'], ALL_KERNEL=ALL_KERNEL):
     test = 'original'
     global processed_gexf_folder
     if mode == 'initial': csv_header = ['name', 'num_node', 'num_edge']
@@ -814,10 +820,3 @@ if __name__ == '__main__':
     run_graph_gen(mode='auxiliary', connected=True)
     run_graph_gen(mode='hierarchy', connected=True)
     # pass
-
-        
-            
-    
-
-    
-    
