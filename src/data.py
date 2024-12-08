@@ -13,7 +13,7 @@ from sklearn.preprocessing import OneHotEncoder
 from torch_geometric.data import Data, Batch
 
 import networkx as nx
-import redis 
+import redis
 import pickle5 as pickle
 import numpy as np
 from collections import Counter, defaultdict, OrderedDict
@@ -25,18 +25,31 @@ from tqdm import tqdm
 import os.path as osp
 
 import torch
+import torch.nn as nn
 from torch_geometric.data import Dataset
 from torch.utils.data import random_split
 
 from shutil import rmtree
 import math
 
+from transformers import AutoTokenizer, AutoModel
+
+tokenizer = AutoTokenizer.from_pretrained("microsoft/codebert-base")
+codebert_model = AutoModel.from_pretrained("microsoft/codebert-base")
+
+# and freeze params
+for param in codebert_model.parameters():
+    param.requires_grad = False
+
+codeBERT_out_to_downstream = 4 # so there a are three pragma types but we must account for a forth being 'None'
+projection = nn.Linear(768, codeBERT_out_to_downstream)  # CodeBERT outputs 768-d embeddings by default
+
 
 NON_OPT_PRAGMAS = ['LOOP_TRIPCOUNT', 'INTERFACE', 'INTERFACE', 'KERNEL']
 WITH_VAR_PRAGMAS = ['DEPENDENCE', 'RESOURCE', 'STREAM', 'ARRAY_PARTITION']
 TARGET = ['perf', 'util-DSP', 'util-BRAM', 'util-LUT', 'util-FF']
 SAVE_DIR = join(get_save_path(), FLAGS.dataset,  f'{FLAGS.v_db}_MLP-{FLAGS.pragma_as_MLP}-{FLAGS.graph_type}-{FLAGS.task}_edge-position-{FLAGS.encode_edge_position}_norm_with-invalid_{FLAGS.invalid}-normalization_{FLAGS.norm_method}_tag_{FLAGS.tag}_{"".join(TARGET)}')
-       
+
 
 ENCODER_PATH = join(SAVE_DIR, 'encoders')
 create_dir_if_not_exists(SAVE_DIR)
@@ -55,7 +68,8 @@ import config
 TARGETS = config.TARGETS
 MACHSUITE_KERNEL = config.MACHSUITE_KERNEL
 poly_KERNEL = config.poly_KERNEL
-ALL_KERNEL = MACHSUITE_KERNEL + poly_KERNEL
+custom_KERNEL = config.custom_KERNEL
+ALL_KERNEL = custom_KERNEL # MACHSUITE_KERNEL + poly_KERNEL
 
 if FLAGS.all_kernels:
     GEXF_FILES = sorted([f for f in iglob(GEXF_FOLDER, recursive=True) if f.endswith('.gexf') and FLAGS.graph_type in f])
@@ -112,7 +126,7 @@ def finte_diff_as_quality(new_result: Result, ref_result: Result) -> float:
         return 0
 
     return -(new_result.perf - ref_result.perf) / (new_util - ref_util)
-    
+
 class MyOwnDataset(Dataset):
     def __init__(self, transform=None, pre_transform=None, data_files=None):
         super(MyOwnDataset, self).__init__(SAVE_DIR, transform, pre_transform)
@@ -144,7 +158,7 @@ class MyOwnDataset(Dataset):
 
     def __len__(self):
         return self.len()
-    
+
     def get_file_path(self, idx):
         if hasattr(self, 'data_files'):
             fn = self.data_files[idx]
@@ -216,7 +230,7 @@ def split_train_test_kernel(dataset):
         else:
             samples['train'].append(dataset.get_file_path(idx))
 
-            
+
     data_dict = defaultdict()
     data_dict['train'] = MyOwnDataset(data_files=samples['train'])
     # data_dict['test'] = MyOwnDataset(data_files=samples['test'])
@@ -254,7 +268,7 @@ def get_data_list():
         enc_itype = encoders['enc_itype']
         enc_ftype = encoders['enc_ftype']
         enc_btype = encoders['enc_btype']
-        
+
         enc_ftype_edge = encoders['enc_ftype_edge']
         enc_ptype_edge = encoders['enc_ptype_edge']
 
@@ -265,7 +279,7 @@ def get_data_list():
         enc_itype = OneHotEncoder(handle_unknown='ignore')
         enc_ftype = OneHotEncoder(handle_unknown='ignore')
         enc_btype = OneHotEncoder(handle_unknown='ignore')
-        
+
         enc_ftype_edge = OneHotEncoder(handle_unknown='ignore')
         enc_ptype_edge = OneHotEncoder(handle_unknown='ignore')
 
@@ -278,7 +292,7 @@ def get_data_list():
     X_itype_all = []
     X_ftype_all = []
     X_btype_all = []
-    
+
     edge_ftype_all = []
     edge_ptype_all = []
     tot_configs = 0
@@ -286,7 +300,7 @@ def get_data_list():
     init_feat_dict = {}
     max_pragma_length = 21
 
-    for gexf_file in tqdm(GEXF_FILES[0:]): 
+    for gexf_file in tqdm(GEXF_FILES[0:]):
         saver.info(f'Working on graph file: {gexf_file}')
         if FLAGS.dataset == 'harp':
             proceed = False
@@ -308,11 +322,11 @@ def get_data_list():
         saver.log_info(gname)
         all_gs[gname] = g
 
-        
+
         if FLAGS.dataset == 'harp':
             db_paths = []
             for db_p in db_path:
-                VER = v_db  
+                VER = FLAGS.v_db
                 paths = [f for f in iglob(db_p, recursive=True) if f.endswith('.db') and n in f and VER in f]
                 db_paths.extend(paths)
             if db_paths is None:
@@ -329,7 +343,7 @@ def get_data_list():
         if len(db_path) == 0:
             saver.warning(f'no database file for {n}')
             continue
-        
+
         # load the database and get the keys
         # the key for each entry shows the value of each of the pragmas in the source file
         for idx, file in enumerate(db_paths):
@@ -381,8 +395,8 @@ def get_data_list():
                 g, ntypes=ntypes, ptypes=ptypes, itypes=itypes, ftypes=ftypes, btypes = btypes, numerics=numerics, point=obj.point)
             edge_dict = _encode_edge_dict(
                 g, ftypes=ftypes_edge, ptypes=ptypes_edge)
-            
-            
+
+
             pragmas = []
             pragma_name = []
             for name, value in sorted(obj.point.items()):
@@ -401,16 +415,16 @@ def get_data_list():
                     raise ValueError()
                 pragmas.append(value)
                 pragma_name.append(name)
- 
+
             check_dim = init_feat_dict.get(gname)
             if check_dim is not None:
                 assert check_dim[0] == len(pragmas), print(check_dim, len(pragmas))
             else:
                 init_feat_dict[gname] = [len(pragmas)]
-                
+
             ## same vector size for pragma vector
             pragmas.extend([0] * (max_pragma_length - len(pragmas)))
-                
+
             xy_dict['pragmas'] = torch.FloatTensor(np.array([pragmas]))
 
 
@@ -456,7 +470,7 @@ def get_data_list():
                     else:
                         y = 0
                 else:
-                    y = 0 if obj.perf < FLAGS.min_allowed_latency else 1    
+                    y = 0 if obj.perf < FLAGS.min_allowed_latency else 1
                 xy_dict['perf'] = torch.FloatTensor(np.array([y])).type(torch.LongTensor)
             else:
                 raise NotImplementedError()
@@ -469,10 +483,10 @@ def get_data_list():
             X_itype_all += xy_dict['X_itype']
             X_ftype_all += xy_dict['X_ftype']
             X_btype_all += xy_dict['X_btype']
-            
+
             edge_ftype_all += edge_dict['X_ftype']
             edge_ptype_all += edge_dict['X_ptype']
-                
+
 
         saver.log_info(f'final valid: {cnt}')
         tot_configs += len(g.variants)
@@ -486,7 +500,7 @@ def get_data_list():
         enc_itype.fit(X_itype_all)
         enc_ftype.fit(X_ftype_all)
         enc_btype.fit(X_btype_all)
-        
+
         enc_ftype_edge.fit(edge_ftype_all)
         enc_ptype_edge.fit(edge_ptype_all)
 
@@ -499,7 +513,9 @@ def get_data_list():
         new_gname = gname.split('_')[0]
         for vname, d in g.variants.items():
             d_node, d_edge = d
+
             X = _encode_X_torch(d_node, enc_ntype, enc_ptype, enc_itype, enc_ftype, enc_btype)
+
             edge_attr = _encode_edge_torch(d_edge, enc_ftype_edge, enc_ptype_edge)
 
             if FLAGS.task == 'regression':
@@ -511,11 +527,11 @@ def get_data_list():
                     edge_attr=edge_attr,
                     kernel=gname,
                     X_contextnids=d_node['X_contextnids'],
-                    X_pragmanids=d_node['X_pragmanids'],                    
-                    X_pragmascopenids=d_node['X_pragmascopenids'],                    
-                    X_pseudonids=d_node['X_pseudonids'],    
-                    X_icmpnids=d_node['X_icmpnids'],    
-                    X_pragma_per_node=d_node['X_pragma_per_node'],            
+                    X_pragmanids=d_node['X_pragmanids'],
+                    X_pragmascopenids=d_node['X_pragmascopenids'],
+                    X_pseudonids=d_node['X_pseudonids'],
+                    X_icmpnids=d_node['X_icmpnids'],
+                    X_pragma_per_node=d_node['X_pragma_per_node'],
                     pragmas=d_node['pragmas'],
                     perf=d_node['perf'],
                     actual_perf=d_node['actual_perf'],
@@ -540,9 +556,9 @@ def get_data_list():
                     kernel=gname,
                     X_contextnids=d_node['X_contextnids'],
                     X_pragmanids=d_node['X_pragmanids'],
-                    X_pragmascopenids=d_node['X_pragmascopenids'],                    
-                    X_pseudonids=d_node['X_pseudonids'],    
-                    X_icmpnids=d_node['X_icmpnids'],    
+                    X_pragmascopenids=d_node['X_pragmascopenids'],
+                    X_pseudonids=d_node['X_pseudonids'],
+                    X_icmpnids=d_node['X_icmpnids'],
                     X_pragma_per_node=d_node['X_pragma_per_node'],
                     pragmas=d_node['pragmas'],
                     perf=d_node['perf']
@@ -577,16 +593,16 @@ def get_data_list():
         from utils import save
         obj = {'enc_ntype': enc_ntype, 'enc_ptype': enc_ptype,
             'enc_itype': enc_itype, 'enc_ftype': enc_ftype,
-            'enc_btype': enc_btype, 
+            'enc_btype': enc_btype,
             'enc_ftype_edge': enc_ftype_edge, 'enc_ptype_edge': enc_ptype_edge}
         p = ENCODER_PATH
         save(obj, p)
-        
+
         for gname in init_feat_dict:
             init_feat_dict[gname].append(max_pragma_length)
         name = 'pragma_dim'
         save(init_feat_dict, join(SAVE_DIR, name))
-        
+
         for gname, feat_dim in init_feat_dict.items():
             saver.log_info(f'{gname} has initial dim {feat_dim[0]}')
 
@@ -621,14 +637,14 @@ def find_pragma_node(g, nid):
             if g.nodes[neighbor]['text'].lower() == pragma:
                 pragma_nodes[pragma] = neighbor
                 break
-    
+
     return pragma_nodes
 
 def get_pragma_numeric(pragma_text, point, pragma_type):
     t_li = pragma_text.split(' ')
     reduction = 0
     for i in range(len(t_li)):
-        if 'REDUCTION' in t_li[i].upper(): 
+        if 'REDUCTION' in t_li[i].upper():
             reduction = 1
         elif 'AUTO{' in t_li[i].upper():
             # print(t_li[i])
@@ -642,12 +658,12 @@ def get_pragma_numeric(pragma_text, point, pragma_type):
                     numeric = 1
                 else:
                     numeric = 5
-            
+
     return reduction, numeric
 
 def fill_pragma_vector(g, neighbor_pragmas, pragma_vector, point, node):
     '''
-        # for each node, a vector of [tile factor, pipeline type, parallel type, parallel factor] 
+        # for each node, a vector of [tile factor, pipeline type, parallel type, parallel factor]
         # pipeline type: 1: off, 5: cg, 10: flatten
         # parallel type: 1: normal, 2: reduction
         # if no pragma assigned to node, a vector of [0, 0, 0, 0]
@@ -691,14 +707,14 @@ def _encode_X_dict(g, ntypes=None, ptypes=None, numerics=None, itypes=None, ftyp
     X_pseudonids = [] # 0 or 1 showing pseudo node
     X_icmpnids = [] # 0 or 1 showing icmp node
     ## for pragma as MLP
-    X_pragma_per_node = [] # for each node, a vector of [tile factor, pipeline type, parallel type, parallel factor] 
+    X_pragma_per_node = [] # for each node, a vector of [tile factor, pipeline type, parallel type, parallel factor]
                            # pipeline type: 1: off, 5: cg, 10: flatten
                            # parallel type: 1: normal, 2: reduction
                            # if no pragma assigned to node, a vector of [0, 0, 0, 0]
     X_pragmascopenids = [] # 0 or 1 showing if previous vector is all zero or not
-    
-    
-      
+
+
+
     for nid, (node, ndata) in enumerate(g.nodes(data=True)):  # TODO: node ordering
         # print(node['type'], type(node['type']))
         assert nid == int(node), f'{nid} {node}'
@@ -710,7 +726,7 @@ def _encode_X_dict(g, ntypes=None, ptypes=None, numerics=None, itypes=None, ftyp
             btypes[ndata['block']] += 1
         if ftypes is not None:
             ftypes[ndata['function']] += 1
-            
+
         pragma_vector = [0, 0, 0, 0]
         if 'pseudo' in ndata['text']:
             X_pseudonids.append(1)
@@ -825,7 +841,7 @@ def _encode_X_dict(g, ntypes=None, ptypes=None, numerics=None, itypes=None, ftyp
                 X_contextnids.append(0)
             else:
                 X_contextnids.append(1)
-                
+
         if ptypes is not None:
             ptypes[ptype] += 1
         if numerics is not None:
@@ -863,19 +879,46 @@ def _encode_X_torch(x_dict, enc_ntype, enc_ptype, enc_itype, enc_ftype, enc_btyp
     x_dict is the returned dict by _encode_X_dict()
     """
     X_ntype = enc_ntype.transform(x_dict['X_ntype'])
-    X_ptype = enc_ptype.transform(x_dict['X_ptype'])
+    # cockeel1
+    # X_ptype = enc_ptype.transform(x_dict['X_ptype'])
     X_itype = enc_itype.transform(x_dict['X_itype'])
     X_ftype = enc_ftype.transform(x_dict['X_ftype'])
     X_btype = enc_btype.transform(x_dict['X_btype'])
 
     X_numeric = x_dict['X_numeric']
+
+    # handle X_ptype w/ CodeBERT:
+    X_ptype_list = x_dict['X_ptype']
+    ptype_embeddings = []
+    for ptype_item in X_ptype_list:
+        ptype_str = ptype_item[0] if ptype_item else 'None'
+        print("cockeel1")
+        print(ptype_str)
+        inputs = tokenizer(ptype_str, return_tensors="pt", truncation=True, max_length=32)
+        with torch.no_grad():
+            outputs = codebert_model(**inputs)
+        cls_embedding = outputs.last_hidden_state[:, 0, :]  # shape [1, 768]
+        ptype_embeddings.append(cls_embedding)
+
+    X_ptype = torch.cat(ptype_embeddings, dim=0)  # shape [num_nodes, 768]
+    X_ptype = projection(X_ptype)  # shape [num_nodes, D]
+
+    # other other one-hot arrays to torch
+    def to_torch(X_scipy):
+        return torch.tensor(X_scipy.toarray(), dtype=torch.float32)
+
+    X_ntype_t = to_torch(X_ntype)
+    X_itype_t = to_torch(X_itype)
+    X_ftype_t = to_torch(X_ftype)
+    X_btype_t = to_torch(X_btype)
+
+    X_numeric_t = torch.tensor(X_numeric, dtype=torch.float32)
+
     # print(len(enc_ntype.categories_[0]))
     # print(len(X_numeric))
     # saver.log_info(X_ntype.shape(0), X_ptype.shape(0), X_itype.shape(0), X_ftype.shape(0), X_btype.shape(0)) #X_numeric.shape(0))
-    
-    X = hstack((X_ntype, X_ptype, X_numeric, X_itype, X_ftype, X_btype))
-    X = _coo_to_sparse(X)
-    X = X.to_dense()
+
+    X = torch.cat([X_ntype_t, X_ptype, X_numeric_t, X_itype_t, X_ftype_t, X_btype_t], dim=1)
 
     return X
 
@@ -884,15 +927,15 @@ def _encode_X_torch(x_dict, enc_ntype, enc_ptype, enc_itype, enc_ftype, enc_btyp
 
 def _encode_edge_dict(g, ftypes=None, ptypes=None):
     X_ftype = [] # flow type <attribute id="5" title="flow" type="long" />
-    X_ptype = [] # position type <attribute id="6" title="position" type="long" />    
-      
+    X_ptype = [] # position type <attribute id="6" title="position" type="long" />
+
     for nid1, nid2, edata in g.edges(data=True):  # TODO: node ordering
         X_ftype.append([edata['flow']])
         X_ptype.append([edata['position']])
 
     return {'X_ftype': X_ftype, 'X_ptype': X_ptype}
 
-    
+
 def _encode_edge_torch(edge_dict, enc_ftype, enc_ptype):
     """
     edge_dict is the dictionary returned by _encode_edge_dict
@@ -911,7 +954,7 @@ def _encode_edge_torch(edge_dict, enc_ftype, enc_ptype):
     X = X.to_dense()
 
     return X
-        
+
 
 def _in_between(text, left, right):
     # text = 'I want to find a string between two substrings'
@@ -943,5 +986,3 @@ def _coo_to_sparse(coo):
 
     rtn = torch.sparse.FloatTensor(i, v, torch.Size(shape))
     return rtn
-
-

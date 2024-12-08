@@ -11,6 +11,7 @@ import config
 TARGETS = config.TARGETS
 MACHSUITE_KERNEL = config.MACHSUITE_KERNEL
 poly_KERNEL = config.poly_KERNEL
+custom_KERNEL = config.custom_KERNEL
 
 from data import get_data_list, MyOwnDataset
 import data
@@ -51,13 +52,15 @@ if __name__ == '__main__':
             if FLAGS.plot_dse: graph_types = ['initial', 'extended', 'hierarchy']
             else: graph_types = [FLAGS.graph_type]
 
-            for dataset in ['machsuite', 'poly']:
+            for dataset in ['custom']: #['machsuite', 'poly']:
                 path = join(get_root_path(), 'dse_database', dataset, 'config')
                 path_graph = join(get_root_path(), 'dse_database', 'generated_graphs', dataset, 'processed')
                 if dataset == 'machsuite':   
                     KERNELS = MACHSUITE_KERNEL
                 elif dataset == 'poly':
                     KERNELS = poly_KERNEL
+                elif dataset == 'custom':
+                    KERNELS = custom_KERNEL
                 else:
                     raise NotImplementedError()
                 

@@ -24,8 +24,9 @@ from utils import create_dir_if_not_exists, get_root_path, natural_keys
 
 
 PRAGMA_POSITION = {'PIPELINE': 0, 'TILE': 2, 'PARALLEL': 1}
-BENCHMARK = 'machsuite'
-BENCHMARK = 'poly'
+#BENCHMARK = 'machsuite'
+#BENCHMARK = 'poly'
+BENCHMARK = 'custom'
 type_graph = 'harp' 
 processed_gexf_folder = join(get_root_path(), f'{type_graph}/{BENCHMARK}/processed')
 auxiliary_node_gexf_folder = join(get_root_path(), f'{type_graph}/{BENCHMARK}/processed/extended-pseudo-block-base/')
@@ -38,7 +39,10 @@ poly_KERNEL = ['2mm', '3mm', 'adi', 'atax', 'bicg', 'bicg-large', 'covariance', 
                'symm-opt', 'syrk', 'syr2k', 'trmm', 'trmm-opt', 'mvt-medium', 'correlation',
                'atax-medium', 'bicg-medium', 'gesummv-medium', 'symm-opt-medium',
                'gemver-medium']
-ALL_KERNEL = {'machsuite': MACHSUITE_KERNEL, 'poly': poly_KERNEL}
+
+custom_KERNEL = ['atax', 'canny-edge', 'cnn', 'harris-corner', 'jacobi', 'optical-flow', 'rijndael', 'sha']
+
+ALL_KERNEL = {'custom': custom_KERNEL} #{'machsuite': MACHSUITE_KERNEL, 'poly': poly_KERNEL}
 
 class Node():
     def __init__(self, block, function, text, type_n, features = None):
@@ -741,7 +745,7 @@ def write_csv_file(csv_dict, csv_header, file_path):
             f_writer.writerow(value)
 
 
-def run_graph_gen(mode='initial', connected=True, target=['machsuite', 'poly'], ALL_KERNEL=ALL_KERNEL):
+def run_graph_gen(mode='initial', connected=True, target=['custom'], ALL_KERNEL=ALL_KERNEL):
     test = 'original'
     global processed_gexf_folder
     if mode == 'initial': csv_header = ['name', 'num_node', 'num_edge']
