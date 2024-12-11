@@ -42,6 +42,7 @@ for param in codebert_model.parameters():
     param.requires_grad = False
 
 codeBERT_out_to_downstream = 4 # so there a are three pragma types but we must account for a forth being 'None'
+torch.manual_seed(42) #hack: fix params so they are consistent for all runs
 projection = nn.Linear(768, codeBERT_out_to_downstream)  # CodeBERT outputs 768-d embeddings by default
 
 
@@ -892,8 +893,8 @@ def _encode_X_torch(x_dict, enc_ntype, enc_ptype, enc_itype, enc_ftype, enc_btyp
     ptype_embeddings = []
     for ptype_item in X_ptype_list:
         ptype_str = ptype_item[0] if ptype_item else 'None'
-        print("cockeel1")
-        print(ptype_str)
+        #print("cockeel1")
+        #print(ptype_str)
         inputs = tokenizer(ptype_str, return_tensors="pt", truncation=True, max_length=32)
         with torch.no_grad():
             outputs = codebert_model(**inputs)
@@ -920,7 +921,7 @@ def _encode_X_torch(x_dict, enc_ntype, enc_ptype, enc_itype, enc_ftype, enc_btyp
 
     X = torch.cat([X_ntype_t, X_ptype, X_numeric_t, X_itype_t, X_ftype_t, X_btype_t], dim=1)
 
-    return X
+    return X.detach() #disable gradient propagation
 
 
 
